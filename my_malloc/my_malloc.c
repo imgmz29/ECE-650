@@ -1,4 +1,5 @@
 #include "my_malloc.h"
+
 #define METADATA_SIZE sizeof(metadata_t)
 
 unsigned long memory_size = 0;
@@ -33,7 +34,7 @@ metadata_t* findBestBlock(size_t size) {
 		// If the free block's size > required size
 		if (curr->size > size) {
 			// Update the best size
-			if ((curr->size < best->size) || best == NULL) {
+			if (best == NULL || (curr->size < best->size)) {
 				best = curr;
 			}
 		}
@@ -43,29 +44,73 @@ metadata_t* findBestBlock(size_t size) {
 	return best;
 }
 
-/* Add newly freed block into the FRONT of free list */
+/* Add newly freed block into the free list */
 void addFreelist(metadata_t* curr) {
-	// Update freelist_size
-	freelist_size += (curr->size + METADATA_SIZE);
+	if (curr == NULL) {
+		printf("Adding a NULL into free list.\n");
+		EXIT_FAILURE;
+	}
+
+	// Update freelist size
+	freelist_size += curr->size + METADATA_SIZE;
+
 	// Update the pointer's information
 	curr->free = 1;
-	curr->prev = NULL;
-	curr->next = freelist_head;
-	// Prevent NULL->prev
-	if (freelist_head != NULL) {
-		freelist_head->prev = curr;
+
+	// Free list is empty
+	if (freelist_head == NULL) {
+		curr->prev = NULL;
+		curr->next = NULL;
+		freelist_head = curr;
 	}
-	freelist_head = curr;
+	// curr's address < freelist_head's address
+	else if (curr < freelist_head && freelist_head != NULL) {
+		curr->prev = NULL;
+		curr->next = freelist_head;
+		freelist_head->prev = curr;
+		freelist_head = curr;
+	}
+	// curr's address > freelist_head's address
+	else {
+		metadata_t* iter = freelist_head;
+		while (iter->next != NULL) {
+			if (iter->next > curr)
+				break;
+			iter = iter->next;
+		}		
+		metadata_t* neighbor = iter->next;
+
+		// the biggest address, add to tail
+		if (neighbor == NULL) {
+			iter->next = curr;
+			curr->prev = iter;
+			curr->next = NULL;
+		}
+		// middle
+		else {
+			iter->next = curr;
+			curr->prev = iter;
+			curr->next = neighbor;
+			neighbor->prev = curr;
+		}
+	}
 }
 
 /* Remove the fit block from free list */
 void removeFreelist(metadata_t* curr) {
-	// head or head + tail (the only in the free list)
-	if (curr == freelist_head) {
+	if (curr == NULL) {
+		printf("Removing a NULL from free list\n");
+		EXIT_FAILURE;
+	}
+
+	// head == tail == curr
+	if (curr->next == NULL && curr->prev == NULL) {
+		freelist_head = NULL;
+	}
+	// head 
+	else if (curr->next != NULL && curr->prev == NULL) {
 		freelist_head = curr->next;
-		if (freelist_head != NULL) {
-			freelist_head->prev = NULL;
-		}
+		freelist_head->prev = NULL;
 	}
 	// tail
 	else if (curr->prev != NULL && curr->next == NULL) {
@@ -104,6 +149,11 @@ void* useNewBlock(size_t size) {
 
 /* Split the block */
 metadata_t* splitBlock(metadata_t* curr, size_t size) {
+	if (curr == NULL) {
+		printf("Splitting a NULL.\n");
+		EXIT_FAILURE;
+	}
+
 	// Create a new block
 	metadata_t* new_block = (metadata_t*)((char*)curr + size + METADATA_SIZE);
 
@@ -112,27 +162,29 @@ metadata_t* splitBlock(metadata_t* curr, size_t size) {
 	new_block->size = curr->size - size - METADATA_SIZE;
 	new_block->prev = NULL;
 	new_block->next = NULL;
-
 	// Add the new block into free list
 	addFreelist(new_block);
+
+	// Update the occupied pointer's size
+	curr->size = size;
 
 	return new_block;
 }
 
 /* Use an old block */
 void* useOldBlock(metadata_t* curr, size_t size) {
+	if (curr == NULL) {
+		printf("Found a NULL.\n");
+		EXIT_FAILURE;
+	}
+
+	// Update freelist size
+	freelist_size -= (curr->size + METADATA_SIZE);
+
 	// Can be splitted
 	if (curr->size > size + METADATA_SIZE) {
 		metadata_t* new_block = splitBlock(curr, size);
-		//removeFreelist(curr);	
-		freelist_size -= (size + METADATA_SIZE);
 	}
-	// Cannot be splitted
-	else {
-		//removeFreelist(curr);
-		freelist_size -= (curr->size + METADATA_SIZE);
-	}
-
 	removeFreelist(curr);
 
 	// Update information
@@ -161,6 +213,7 @@ void mergeFreelist(metadata_t* curr) {
 //First Fit malloc/free
 void* ff_malloc(size_t size) {
 	metadata_t* find = findFirstBlock(size);
+
 	if (find == NULL) {
 		return useNewBlock(size);
 	}
@@ -170,6 +223,13 @@ void* ff_malloc(size_t size) {
 }
 
 void ff_free(void* ptr) {
+	if (ptr == NULL) 
+		return;
+	if (block_head == NULL) {
+		printf("No allocated blocks to free.\n");
+		EXIT_FAILURE;
+	}
+
 	metadata_t* meta = (metadata_t*)((char*)ptr - METADATA_SIZE);
 	addFreelist(meta);
 	mergeFreelist(meta);
@@ -178,6 +238,7 @@ void ff_free(void* ptr) {
 //Best Fit malloc/free 
 void* bf_malloc(size_t size) {
 	metadata_t* find = findBestBlock(size);
+
 	if (find == NULL) {
 		return useNewBlock(size);
 	}
